@@ -7,6 +7,7 @@ import {
     open,
     readFile,
     readdir,
+    realpath,
     rm,
     symlink,
     writeFile,
@@ -188,6 +189,20 @@ async function withFixture(run) {
         await rm(fixture.fixtureRoot, { recursive: true, force: true })
     }
 }
+
+test("ZIP extraction accepts a destination beneath a directory alias", async () => {
+    await withFixture(async fixture => {
+        await addArchiveProject(fixture)
+        const realParent = path.join(fixture.fixtureRoot, "extraction-parent")
+        const aliasParent = path.join(fixture.fixtureRoot, "extraction-alias")
+        await mkdir(realParent)
+        await mkdir(path.join(realParent, "output"))
+        await symlink(await realpath(realParent), aliasParent, process.platform === "win32" ? "junction" : "dir")
+        const destination = path.join(aliasParent, "output")
+        await extractProjectArchive(path.join(fixture.projectsDirectory, "archive-demo.zip"), destination)
+        assert.ok(JSON.parse(await readFile(path.join(realParent, "output", "project.json"), "utf8")))
+    })
+})
 
 test("read tools stay inside the allowlist and keep caption text opt-in", async () => {
     await withFixture(async fixture => {
