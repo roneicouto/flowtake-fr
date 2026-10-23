@@ -8,7 +8,7 @@ O histórico Git original é preservado. No clone local, `origin` aponta para o 
 
 ## Compilação e download
 
-O workflow **Windows fork build and release** testa JavaScript, formatação Rust, testes Rust e clippy, compila NSIS/MSI e monta um ZIP portátil. É executado em pushes para main, PRs para main e manualmente pela aba Actions.
+O workflow **Windows fork build and release** testa JavaScript, formatação do novo módulo Rust de diagnóstico, testes Rust e clippy, compila NSIS/MSI e monta um ZIP portátil. É executado em pushes para main, PRs para main e manualmente pela aba Actions. A versão upstream tem divergências preexistentes de formatação em vários módulos; não são reformatados nesta correção.
 
 Depois de um push para main com todas as etapas aprovadas, publica uma prerelease Windows em:
 
