@@ -25,6 +25,10 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p align="center">
+  Find Flowtake useful? <a href="https://github.com/JNX03/Flowtake">Star the repository</a> to bookmark it, or <a href="https://github.com/JNX03/Flowtake/discussions">share the demo workflow you want to improve</a>.
+</p>
+
 ---
 
 ## What Flowtake does
@@ -162,6 +166,16 @@ Maintainers can use the free [six-beat developer-tool demo kit](https://jnx03.gi
 Improvements to the recorder, editor, documentation, and demo kit are welcome through [CONTRIBUTING.md](CONTRIBUTING.md). GitHub issues, pull requests, and discussions are public, so use public or synthetic examples and remove credentials, customer data, private repository details, filenames, notifications, and production access before sharing.
 
 ## Development
+
+Source checkouts include **Check recorder** in the launcher's sidebar. It checks
+screen capture access and required local tools, offers setup recovery steps,
+and copies a readiness report without local paths, project names, device
+identifiers, or credentials. Camera and microphone access are checked when you
+enable those devices. Refresh after changing permissions or installing tools;
+macOS may also require quitting and reopening the exact installed app.
+
+This improvement is in development and is not part of the published v1.7.2
+download. Review copied reports before posting them in a public issue.
 
 ### Prerequisites
 

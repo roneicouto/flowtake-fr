@@ -546,6 +546,37 @@ test("ZIP edits stream media, verify replacement, and fail closed for an open Fl
     })
 })
 
+test("archive extraction accepts a real directory beneath a symlinked parent", async () => {
+    await withFixture(async fixture => {
+        const archivePath = await addArchiveProject(fixture)
+        const actualParent = path.join(fixture.fixtureRoot, "actual-extraction-parent")
+        const aliasParent = path.join(fixture.fixtureRoot, "extraction-parent-alias")
+        await mkdir(actualParent)
+        await mkdir(path.join(actualParent, "extracted"))
+        await symlink(await realpath(actualParent), aliasParent, platform() === "win32" ? "junction" : "dir")
+        const destination = path.join(aliasParent, "extracted")
+
+        await extractProjectArchive(archivePath, destination)
+
+        const manifest = JSON.parse(await readFile(path.join(actualParent, "extracted", "project.json"), "utf8"))
+        assert.equal(manifest.project.id, "archive-demo")
+        assert.deepEqual(
+            await readFile(path.join(destination, "screen.mp4")),
+            Buffer.alloc(256 * 1024, 0x5a),
+        )
+
+        const directAlias = path.join(fixture.fixtureRoot, "direct-extraction-alias")
+        const emptyDestination = path.join(actualParent, "empty")
+        await mkdir(emptyDestination)
+        await symlink(await realpath(emptyDestination), directAlias, platform() === "win32" ? "junction" : "dir")
+        await assert.rejects(
+            extractProjectArchive(archivePath, directAlias),
+            error => error.code === "unsafe-project-archive" && /real directory/i.test(error.message),
+        )
+        assert.deepEqual(await readdir(emptyDestination), [])
+    })
+})
+
 test("ZIP output failures close streams, remove partial archives, and preserve the original", async () => {
     await withFixture(async fixture => {
         const archivePath = await addArchiveProject(fixture)
