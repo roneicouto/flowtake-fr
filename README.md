@@ -1,3 +1,5 @@
+> **flowtake-fr — fork pessoal para Windows:** [Baixar builds](https://github.com/roneicouto/flowtake-fr/releases) · [GitHub Actions](https://github.com/roneicouto/flowtake-fr/actions/workflows/windows-fork-release.yml) · [Sincronização com o original](docs/fork-github-actions-pt-BR.md). Inclui a correção DXGI/AMF; a validação completa no aplicativo está em andamento. Projeto original: [JNX03/Flowtake](https://github.com/JNX03/Flowtake).
+
 <p align="center">
   <img src="website/public/assets/logo.png" alt="Flowtake app icon" width="160">
 </p>
