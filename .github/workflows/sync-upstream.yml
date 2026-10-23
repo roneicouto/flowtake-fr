@@ -49,16 +49,25 @@ jobs:
             exit 0
           fi
 
-          # This branch tracks upstream commits only. A normal push preserves
-          # ancestry and rejects rewrites or unexpected edits; main is untouched.
-          gh auth setup-git
-          git push origin refs/remotes/upstream/main:refs/heads/sync/upstream-main
-
-          existing="$(gh pr list --repo "$GH_REPO" --base main --head sync/upstream-main --state open --json url --jq '.[0].url // empty')"
+          # Leave the open proposal alone so manual conflict resolutions are
+          # never overwritten. Check again after that proposal is reviewed.
+          existing="$(gh pr list --repo "$GH_REPO" --base main --state open --json url,headRefName --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))][0].url // empty')"
           if [[ -n "$existing" ]]; then
-            echo "PR atualizado: $existing" >> "$GITHUB_STEP_SUMMARY"
+            echo "Aguardando revisão do PR existente: $existing" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+
+          branch="sync/upstream-${upstream_commit:0:12}"
+          reviewed="$(gh pr list --repo "$GH_REPO" --base main --head "$branch" --state all --json url --jq '.[0].url // empty')"
+          if [[ -n "$reviewed" ]]; then
+            echo "Esta revisão upstream já foi proposta: $reviewed" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # One branch per upstream revision lets the next update start fresh
+          # after a resolved PR is merged. Never force-push or modify main.
+          gh auth setup-git
+          git push origin "refs/remotes/upstream/main:refs/heads/$branch"
 
           cat > "$RUNNER_TEMP/upstream-pr.md" <<EOF
           Atualizações de https://github.com/JNX03/Flowtake, branch main.
@@ -70,6 +79,6 @@ jobs:
           Use **Create a merge commit** para preservar a ancestralidade upstream.
           As alterações do fork permanecem na branch main e são combinadas no merge.
           EOF
-          gh pr create --repo "$GH_REPO" --base main --head sync/upstream-main \
+          gh pr create --repo "$GH_REPO" --base main --head "$branch" \
             --title 'Atualizar Flowtake a partir do upstream' \
             --body-file "$RUNNER_TEMP/upstream-pr.md" >> "$GITHUB_STEP_SUMMARY"

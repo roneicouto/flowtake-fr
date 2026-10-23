@@ -22,9 +22,11 @@ O workflow original `Release` e o CI multiplataforma continuam no histórico e n
 
 ## Atualizações do Flowtake original
 
-O workflow **Check upstream updates** consulta a main de JNX03/Flowtake diariamente às 12:17 UTC (09:17 de Fortaleza) ou manualmente na aba Actions. Se houver commits ainda não incorporados, atualiza a branch `sync/upstream-main` por push normal e abre/atualiza um PR para main. Não modifica main e não executa merge automático. Um histórico upstream reescrito ou edição inesperada da branch de sincronização faz o push falhar em vez de sobrescrever commits.
+O workflow **Check upstream updates** consulta a main de JNX03/Flowtake diariamente às 12:17 UTC (09:17 de Fortaleza) ou manualmente na aba Actions. Se houver commits ainda não incorporados, cria uma branch `sync/upstream-<commit>` por push normal e abre um PR para main. Não modifica main e não executa merge automático. Não usa force-push e não sobrescreve branches com resoluções manuais.
 
-O PR pode apresentar conflitos. Eles precisam ser resolvidos preservando as correções locais antes de incorporar a atualização. Use **Create a merge commit** no GitHub; isso mantém a ancestralidade upstream e permite detectar quais commits já foram incorporados. Cada novo commit na branch de sincronização atualiza o mesmo PR aberto e dispara seus checks usando o token pessoal limitado ao repositório.
+O PR pode apresentar conflitos. Eles precisam ser resolvidos preservando as correções locais antes de incorporar a atualização. Use **Create a merge commit** no GitHub; isso mantém a ancestralidade upstream e permite detectar quais commits já foram incorporados. Enquanto houver um PR upstream aberto, a automação aguarda sua revisão. Depois, uma nova revisão upstream usa outra branch. Uma proposta fechada não é reaberta automaticamente para o mesmo commit.
+
+O primeiro teste de sincronização abriu o PR #11 usando a branch inicial `sync/upstream-main`. Ela continua válida e será preservada pelo fluxo acima.
 
 ## Secret necessário para sincronização
 
