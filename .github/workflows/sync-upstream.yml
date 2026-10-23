@@ -1,0 +1,84 @@
+name: Check upstream updates
+
+on:
+  schedule:
+    - cron: '17 12 * * *'
+  workflow_dispatch:
+
+# The repository-scoped UPSTREAM_SYNC_TOKEN supplies the write permissions.
+# It needs Contents, Pull requests and Workflows: read and write.
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Require a repository-scoped sync token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo 'Configure UPSTREAM_SYNC_TOKEN with Contents, Pull requests and Workflows read/write.' >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch upstream and open or update its pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/JNX03/Flowtake.git
+          git fetch --no-tags upstream main
+          upstream_commit="$(git rev-parse refs/remotes/upstream/main)"
+          if git merge-base --is-ancestor "$upstream_commit" HEAD; then
+            echo 'Upstream is already included; no update required.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Leave the open proposal alone so manual conflict resolutions are
+          # never overwritten. Check again after that proposal is reviewed.
+          existing="$(gh pr list --repo "$GH_REPO" --base main --state open --json url,headRefName --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))][0].url // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "Aguardando revisão do PR existente: $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          branch="sync/upstream-${upstream_commit:0:12}"
+          reviewed="$(gh pr list --repo "$GH_REPO" --base main --head "$branch" --state all --json url --jq '.[0].url // empty')"
+          if [[ -n "$reviewed" ]]; then
+            echo "Esta revisão upstream já foi proposta: $reviewed" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # One branch per upstream revision lets the next update start fresh
+          # after a resolved PR is merged. Never force-push or modify main.
+          gh auth setup-git
+          git push origin "refs/remotes/upstream/main:refs/heads/$branch"
+
+          cat > "$RUNNER_TEMP/upstream-pr.md" <<EOF
+          Atualizações de https://github.com/JNX03/Flowtake, branch main.
+
+          Commit upstream: ${upstream_commit}
+
+          Este PR não faz merge automático. Revise os conflitos e os resultados
+          de CI, especialmente o caminho DXGI/AMF, antes de incorporar.
+          Use **Create a merge commit** para preservar a ancestralidade upstream.
+          As alterações do fork permanecem na branch main e são combinadas no merge.
+          EOF
+          gh pr create --repo "$GH_REPO" --base main --head "$branch" \
+            --title 'Atualizar Flowtake a partir do upstream' \
+            --body-file "$RUNNER_TEMP/upstream-pr.md" >> "$GITHUB_STEP_SUMMARY"

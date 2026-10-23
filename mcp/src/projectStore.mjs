@@ -338,6 +338,8 @@ export async function extractProjectArchive(zipPath, destinationDirectory) {
                 }
                 index += 1
 
+                // Resolve against the same canonical root used by containment
+                // checks (TEMP may use an 8.3 path or a junction on Windows).
                 const outputPath = path.resolve(realDestination, ...current.fileName.replace(/\/$/, "").split("/"))
                 if (!isInside(realDestination, outputPath)) {
                     throw invalidArchive(`Archive entry escapes the extraction directory: ${current.fileName}`)

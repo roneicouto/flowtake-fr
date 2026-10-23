@@ -233,12 +233,17 @@ fn ffmpeg_stderr_is_capture_error(msg: &str) -> bool {
         || lower.contains("input/output error")
 }
 
-fn handle_ffmpeg_diagnostic(app: &AppHandle, message: &str) {
+fn handle_ffmpeg_diagnostic(
+    app: &AppHandle,
+    diagnostics: &crate::recording_diagnostics::CaptureDiagnostics,
+    message: &str,
+) {
     let message = message.trim();
     if message.is_empty() {
         return;
     }
 
+    diagnostics.record(message);
     log::debug!("[FFmpeg] {}", message);
     #[cfg(target_os = "macos")]
     let is_permission_error = macos_ffmpeg_stderr_is_permission_error(message);
@@ -259,6 +264,31 @@ fn handle_ffmpeg_diagnostic(app: &AppHandle, message: &str) {
 /// carriage returns instead of newlines, so `BufRead::lines` can retain a very
 /// large buffer during long recordings and eventually block the child process.
 fn spawn_ffmpeg_stderr_reader(stderr: std::process::ChildStderr, app: AppHandle) {
+    let diagnostics = {
+        let state = app.state::<Mutex<AppState>>();
+        let mut state = state.lock().unwrap();
+        // Redact absolute paths in the command, including the owned output.
+        let mut redactions = vec![];
+        if let Some(args) = state
+            .camera_mic_config
+            .as_ref()
+            .and_then(|config| config.get("ffmpegArgs"))
+            .and_then(Value::as_array)
+        {
+            redactions.extend(
+                args.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|arg| std::path::Path::new(arg).is_absolute())
+                    .map(str::to_owned),
+            );
+        }
+        if let Some(home) = dirs::home_dir() {
+            redactions.push(home.to_string_lossy().into_owned());
+        }
+        let diagnostics = crate::recording_diagnostics::CaptureDiagnostics::new(redactions);
+        state.ffmpeg_diagnostics = Some(diagnostics.clone());
+        diagnostics
+    };
     std::thread::spawn(move || {
         use std::io::Read;
 
@@ -278,7 +308,11 @@ fn spawn_ffmpeg_stderr_reader(stderr: std::process::ChildStderr, app: AppHandle)
             for byte in &chunk[..read] {
                 if *byte == b'\n' || *byte == b'\r' {
                     if !pending.is_empty() {
-                        handle_ffmpeg_diagnostic(&app, &String::from_utf8_lossy(&pending));
+                        handle_ffmpeg_diagnostic(
+                            &app,
+                            &diagnostics,
+                            &String::from_utf8_lossy(&pending),
+                        );
                         pending.clear();
                     }
                 } else if pending.len() < 32 * 1024 {
@@ -286,15 +320,20 @@ fn spawn_ffmpeg_stderr_reader(stderr: std::process::ChildStderr, app: AppHandle)
                 } else {
                     // A diagnostic line should never be this large. Flush the
                     // bounded prefix so malformed output cannot grow forever.
-                    handle_ffmpeg_diagnostic(&app, &String::from_utf8_lossy(&pending));
+                    handle_ffmpeg_diagnostic(
+                        &app,
+                        &diagnostics,
+                        &String::from_utf8_lossy(&pending),
+                    );
                     pending.clear();
                 }
             }
         }
 
         if !pending.is_empty() {
-            handle_ffmpeg_diagnostic(&app, &String::from_utf8_lossy(&pending));
+            handle_ffmpeg_diagnostic(&app, &diagnostics, &String::from_utf8_lossy(&pending));
         }
+        diagnostics.finish();
     });
 }
 
@@ -324,6 +363,25 @@ fn verify_capture_process_start(
                 )));
             }
         }
+    }
+}
+
+fn capture_start_error(app: &AppHandle, error: AppError) -> AppError {
+    let diagnostics = app
+        .state::<Mutex<AppState>>()
+        .lock()
+        .unwrap()
+        .ffmpeg_diagnostics
+        .take();
+    let detail = diagnostics
+        .map(|value| value.summary())
+        .filter(|value| !value.is_empty());
+    match detail {
+        Some(detail) => {
+            log::error!("[capture_start] {}. FFmpeg: {}", error, detail);
+            AppError::General(format!("{}. FFmpeg: {}", error, detail))
+        }
+        None => error,
     }
 }
 
@@ -808,8 +866,9 @@ fn recording_pixel_format(encoder: &str, qsv_zero_copy: bool) -> Option<&'static
         // other system-memory inputs must keep negotiating NV12 themselves.
         "h264_qsv" if qsv_zero_copy => Some("qsv"),
         "h264_qsv" => None,
-        // NVENC/AMF may receive D3D11 hardware frames directly. Forcing a
-        // software pixel format there makes FFmpeg insert an invalid transfer.
+        // NVENC can consume D3D11 frames; AMF's DXGI input is explicitly
+        // converted to NV12 by ddagrab_transfer_filter. Let other inputs
+        // negotiate their format without an implicit hardware transfer.
         "h264_nvenc" | "h264_amf" => None,
         _ => Some("yuv420p"),
     }
@@ -910,7 +969,11 @@ fn append_recording_output_args(args: &mut Vec<String>, config: RecordingOutputC
 #[cfg(target_os = "windows")]
 fn ddagrab_transfer_filter(encoder: &str) -> Option<&'static str> {
     match encoder {
-        "h264_nvenc" | "h264_amf" => None,
+        "h264_nvenc" => None,
+        // Direct ddagrab D3D11 surfaces can initialize AMF successfully but
+        // fail at SubmitInput with AMF_DIRECTX_FAILED (18). Use a software
+        // NV12 input while retaining hardware H.264 encoding through AMF.
+        "h264_amf" => Some("hwdownload,format=bgra,format=nv12"),
         // Keep DXGI frames in video memory. This avoids a full-resolution BGRA
         // download followed by another QSV upload for every frame.
         "h264_qsv" => Some("hwmap=derive_device=qsv:mode=read+write+direct"),
@@ -2333,7 +2396,8 @@ async fn start_recording_impl(app: AppHandle) -> AppResult<()> {
             if let Some(stderr) = process.stderr.take() {
                 spawn_ffmpeg_stderr_reader(stderr, app.clone());
             }
-            verify_capture_process_start(&mut process, std::time::Duration::from_millis(200))?;
+            verify_capture_process_start(&mut process, std::time::Duration::from_millis(200))
+                .map_err(|error| capture_start_error(&app, error))?;
 
             // Reset stop flag and start capture thread
             let stop_flag = {
@@ -2421,7 +2485,8 @@ async fn start_recording_impl(app: AppHandle) -> AppResult<()> {
                     verify_capture_process_start(
                         &mut process,
                         std::time::Duration::from_millis(200),
-                    )?;
+                    )
+                    .map_err(|error| capture_start_error(&app, error))?;
                     {
                         let mut state = state.lock().unwrap();
                         if !state.recording_capture_claimed || !state.is_recording {
@@ -4014,9 +4079,13 @@ fn kill_ffmpeg(app: &AppHandle) -> AppResult<()> {
     }
 
     // Take the FFmpeg process (used by both window and screen/area capture now)
-    let (pid, mut process) = {
+    let (pid, mut process, diagnostics) = {
         let mut s = state.lock().unwrap();
-        (s.ffmpeg_child_id.take(), s.ffmpeg_process.take())
+        (
+            s.ffmpeg_child_id.take(),
+            s.ffmpeg_process.take(),
+            s.ffmpeg_diagnostics.take(),
+        )
     };
 
     if let Some(ref mut process) = process {
@@ -4046,10 +4115,21 @@ fn kill_ffmpeg(app: &AppHandle) -> AppResult<()> {
                     return match finalization_failure {
                         Some(error) => Err(error),
                         None if status.success() => Ok(()),
-                        None => Err(incomplete_recording_error(format!(
-                            "The encoder exited with {}",
-                            status
-                        ))),
+                        None => {
+                            let detail = diagnostics
+                                .as_ref()
+                                .map(|value| value.summary())
+                                .filter(|value| !value.is_empty());
+                            let reason = format!(
+                                "The capture/encoding process exited with {}{}",
+                                status,
+                                detail
+                                    .map(|value| format!(". FFmpeg: {}", value))
+                                    .unwrap_or_default()
+                            );
+                            log::error!("[kill_ffmpeg] {}", reason);
+                            Err(incomplete_recording_error(reason))
+                        }
                     };
                 }
                 Ok(None) => {
@@ -5285,8 +5365,12 @@ Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'screen.mp4':
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn ddagrab_only_downloads_frames_for_software_encoding() {
+    fn ddagrab_uses_compatible_input_surfaces_for_each_encoder() {
         assert_eq!(ddagrab_transfer_filter("h264_nvenc"), None);
+        assert_eq!(
+            ddagrab_transfer_filter("h264_amf"),
+            Some("hwdownload,format=bgra,format=nv12")
+        );
         assert_eq!(
             ddagrab_transfer_filter("h264_qsv"),
             Some("hwmap=derive_device=qsv:mode=read+write+direct")

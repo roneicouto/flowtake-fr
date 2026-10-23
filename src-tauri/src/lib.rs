@@ -12,6 +12,7 @@ mod keyboard_tracker;
 mod macos_capture;
 mod mouse_tracker;
 mod process_containment;
+mod recording_diagnostics;
 mod state;
 
 use state::AppState;

@@ -7,6 +7,7 @@ import {
     open,
     readFile,
     readdir,
+    realpath,
     rm,
     symlink,
     writeFile,
@@ -188,6 +189,20 @@ async function withFixture(run) {
         await rm(fixture.fixtureRoot, { recursive: true, force: true })
     }
 }
+
+test("ZIP extraction accepts a destination beneath a directory alias", async () => {
+    await withFixture(async fixture => {
+        await addArchiveProject(fixture)
+        const realParent = path.join(fixture.fixtureRoot, "extraction-parent")
+        const aliasParent = path.join(fixture.fixtureRoot, "extraction-alias")
+        await mkdir(realParent)
+        await mkdir(path.join(realParent, "output"))
+        await symlink(await realpath(realParent), aliasParent, platform() === "win32" ? "junction" : "dir")
+        const destination = path.join(aliasParent, "output")
+        await extractProjectArchive(path.join(fixture.projectsDirectory, "archive-demo.zip"), destination)
+        assert.ok(JSON.parse(await readFile(path.join(realParent, "output", "project.json"), "utf8")))
+    })
+})
 
 test("read tools stay inside the allowlist and keep caption text opt-in", async () => {
     await withFixture(async fixture => {
@@ -537,9 +552,9 @@ test("archive extraction accepts a real directory beneath a symlinked parent", a
         const actualParent = path.join(fixture.fixtureRoot, "actual-extraction-parent")
         const aliasParent = path.join(fixture.fixtureRoot, "extraction-parent-alias")
         await mkdir(actualParent)
-        await symlink(actualParent, aliasParent, platform() === "win32" ? "junction" : "dir")
+        await mkdir(path.join(actualParent, "extracted"))
+        await symlink(await realpath(actualParent), aliasParent, platform() === "win32" ? "junction" : "dir")
         const destination = path.join(aliasParent, "extracted")
-        await mkdir(destination)
 
         await extractProjectArchive(archivePath, destination)
 
@@ -553,7 +568,7 @@ test("archive extraction accepts a real directory beneath a symlinked parent", a
         const directAlias = path.join(fixture.fixtureRoot, "direct-extraction-alias")
         const emptyDestination = path.join(actualParent, "empty")
         await mkdir(emptyDestination)
-        await symlink(emptyDestination, directAlias, platform() === "win32" ? "junction" : "dir")
+        await symlink(await realpath(emptyDestination), directAlias, platform() === "win32" ? "junction" : "dir")
         await assert.rejects(
             extractProjectArchive(archivePath, directAlias),
             error => error.code === "unsafe-project-archive" && /real directory/i.test(error.message),
