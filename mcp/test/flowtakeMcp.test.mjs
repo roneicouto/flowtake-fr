@@ -12,7 +12,7 @@ import {
     symlink,
     writeFile,
 } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { platform, tmpdir } from "node:os"
 import path from "node:path"
 import { Writable } from "node:stream"
 import { fileURLToPath } from "node:url"
@@ -197,7 +197,7 @@ test("ZIP extraction accepts a destination beneath a directory alias", async () 
         const aliasParent = path.join(fixture.fixtureRoot, "extraction-alias")
         await mkdir(realParent)
         await mkdir(path.join(realParent, "output"))
-        await symlink(await realpath(realParent), aliasParent, process.platform === "win32" ? "junction" : "dir")
+        await symlink(await realpath(realParent), aliasParent, platform() === "win32" ? "junction" : "dir")
         const destination = path.join(aliasParent, "output")
         await extractProjectArchive(path.join(fixture.projectsDirectory, "archive-demo.zip"), destination)
         assert.ok(JSON.parse(await readFile(path.join(realParent, "output", "project.json"), "utf8")))

@@ -43,6 +43,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
           components: rustfmt, clippy
 
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: './src-tauri -> target'
@@ -55,9 +58,6 @@ jobs:
 
       - name: Run Node tests
         run: npm test
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
       - name: Run Rust unit tests (including recording diagnostics)
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
